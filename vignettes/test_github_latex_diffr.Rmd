@@ -1,0 +1,127 @@
+---
+title: "Test LatexDiffr"
+output: html_document
+date: "2025-06-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(gh)
+library(stringr)
+library(base64enc)
+library(htmltools)
+library(diffobj)
+library(diffmatchpatch)
+library(latexdiffr)
+library(glue)
+```
+
+```{r}
+url <- "https://github.com/iqss-research/2k1-in-silico/blob/master/text/2k1.tex"
+
+pattern <- "^https://github\\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*\\.tex)$"
+matches <- stringr::str_match(url, pattern)
+
+if (any(is.na(matches))) stop("❌ Invalid GitHub .tex file URL")
+
+owner <- as.character(matches[2])
+repo  <- as.character(matches[3])
+ref   <- as.character(matches[4])
+path  <- as.character(matches[5])
+
+# Confirm everything is a character
+str(list(owner = owner, repo = repo, ref = ref, path = path))
+```
+
+```{r}
+
+get_commits_for_file <- function(owner, repo, path, ref = "main", max_commits = 20) {
+  commits <- tryCatch({
+    gh::gh(
+      "/repos/:owner/:repo/commits",
+      owner = owner,
+      repo = repo,
+      path = path,
+      sha = ref,
+      .limit = max_commits
+    )
+  }, error = function(e) {
+    message("❌ Failed to fetch commits: ", conditionMessage(e))
+    return(NULL)
+  })
+
+  if (is.null(commits) || length(commits) == 0) return(NULL)
+
+  # Extract summary info into a data frame or list
+  commit_data <- lapply(commits, function(commit) {
+    list(
+      sha     = commit$sha,
+      message = commit$commit$message,
+      author  = commit$commit$author$name,
+      date    = commit$commit$author$date,
+      url     = commit$html_url
+    )
+  })
+
+  return(commit_data)
+}
+
+
+```
+
+```{r}
+commits <- get_commits_for_file(owner, repo, path, ref)
+```
+
+```{r}
+
+# make sure indexed chronologically
+
+i <- 1
+for (i in 1:3) {
+# for (i in 1:(length(commit_list) - 1)) {
+  sha_old <- commits[[i]]$sha
+  sha_new <- commits[[i+1]]$sha
+  
+  message(glue("Diffing {sha_old} vs {sha_new}"))
+  
+  # Checkout both versions manually and run latexdiff
+  old_file <- tempfile(fileext = ".tex")
+  new_file <- tempfile(fileext = ".tex")
+  
+  # Save each version of the file temporarily
+  system(glue("git show {sha_old}:{target_file} > {old_file}"))
+  system(glue("git show {sha_new}:{target_file} > {new_file}"))
+  
+  # Run latexdiff
+  output_file <- glue("diff_{sha_old}_vs_{sha_new}.tex")
+  latexdiffr::latexdiff(old_file, new_file, output = output_file)
+  
+  tools::texi2pdf(output_file, clean = TRUE)
+}
+
+
+
+
+for(i in seq_along(commits)) {
+  commit <- commits[[i]]
+  cat(sprintf("Commit %d:\n", i))
+  cat(sprintf("SHA: %s\n", commit$sha))
+  cat(sprintf("Message: %s\n", commit$message))
+  cat(sprintf("Author: %s\n", commit$author))
+  cat(sprintf("Date: %s\n", commit$date))
+  cat(sprintf("URL: %s\n\n", commit$url))
+}
+
+for(i in 1:2){
+# for(i in seq_along(commits)){
+  commit <- commits[[i]]
+  
+  git_latexdiff(path = url,
+                revision = commit$sha)
+  
+}
+
+```
+

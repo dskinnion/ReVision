@@ -1,0 +1,547 @@
+---
+title: "DiffMatchPatch Test"
+output: html_document
+date: "2025-07-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(gh)
+library(stringr)
+library(base64enc)
+library(diffmatchpatch)
+library(htmltools)
+library(glue)
+library(reticulate)
+```
+
+```{r}
+url <- "https://github.com/iqss-research/2k1-in-silico/blob/master/text/2k1.tex"
+
+n_commits <- 5
+```
+
+```{r}
+
+pattern <- "^https://github\\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*\\.tex)$"
+matches <- stringr::str_match(url, pattern)
+
+if (any(is.na(matches))) stop("❌ Invalid GitHub .tex file URL")
+
+owner <- as.character(matches[2])
+repo  <- as.character(matches[3])
+ref   <- as.character(matches[4])
+path  <- as.character(matches[5])
+
+# Confirm everything is a character
+str(list(owner = owner, repo = repo, ref = ref, path = path))
+
+glue("Repo: {owner}/{repo} | Branch: {ref} | Path: {path}")
+
+# 2. Fetch file
+tryCatch({
+  tex_raw <- gh::gh(
+    "/repos/:owner/:repo/contents/:path",
+    owner = owner,
+    repo = repo,
+    path = path,
+    ref = ref
+  )
+  
+  raw_text <- rawToChar(base64enc::base64decode(tex_raw$content))
+
+  lines <- strsplit(raw_text, "\n")[[1]]
+  cat("✅ Successfully fetched file.\n\n")
+  cat("📄 First 10 lines:\n\n")
+  cat(paste(head(lines, 10), collapse = "\n"))
+
+}, error = function(e) {
+  message("❌ Failed to fetch file: ", conditionMessage(e))
+})
+
+
+```
+
+```{r}
+# Get commit history for the file
+commits <- gh("/repos/:owner/:repo/commits",
+              owner = owner, repo = repo, path = path,
+              ref = ref, .limit = n_commits)
+
+commit_info <- lapply(commits, function(c) {
+  list(sha = c$sha,
+       date = c$commit$author$date,
+       msg  = c$commit$message)
+})
+
+```
+
+```{r}
+
+# Get file content at a specific commit
+get_file_at_commit <- function(owner, repo, path, ref) {
+  # res <- gh("/repos/:owner/:repo/contents/:path",
+  #           owner = owner, repo = repo, path = path, ref = sha)
+  # rawToChar(base64decode(res$content))
+  
+  res <- gh::gh(
+    "/repos/:owner/:repo/contents/:path",
+    owner = owner,
+    repo = repo,
+    path = path,
+    ref = ref,
+    .send_headers = c(Accept = "application/vnd.github.v3.raw")
+  )
+  
+  rawToChar(res)
+  
+}
+
+# res <- gh::gh(
+#     "/repos/:owner/:repo/contents/:path",
+#     owner = owner,
+#     repo = repo,
+#     path = path,
+#     sha = sha_old
+#   )
+#   
+# tst1<-  rawToChar(base64enc::base64decode(res$content))
+# 
+# res <- gh::gh(
+#     "/repos/:owner/:repo/contents/:path",
+#     owner = owner,
+#     repo = repo,
+#     path = path,
+#     ref = "c1c443fcbc1a13d0e2d6a4e693e05c4209aa0c3f",
+#     .send_headers = c(Accept = "application/vnd.github.v3.raw")
+#   )
+# 
+# rawToChar(res)
+# res["gh_response"]
+#   
+# tst2<-  rawToChar(base64enc::base64decode(res$content))
+# 
+# library(diffobj)
+# diffChr(tst1, tst2)
+
+```
+
+```{r}
+
+extract_title_and_abstract <- function(tex) {
+  # Enable DOTALL mode using (?s) so . matches newlines
+  title <- str_match(tex, "(?s)\\\\title\\{(.*?)\\}")[, 2]
+  abstract <- str_match(tex, "(?s)\\\\begin\\{abstract\\}(.*?)\\\\end\\{abstract\\}")[, 2]
+
+  # Clean up extra spacing if needed
+  title <- str_trim(title)
+  abstract <- str_trim(abstract)
+
+  list(title = title, abstract = abstract)
+}
+
+
+```
+
+```{r}
+# highlight_diff <- function(old, new) {
+#   dmp <- diffmatchpatch::dmp_diff()  # ✅ correct instantiation
+# 
+#   diffs <- dmp$diff_main(old %||% "", new %||% "")
+#   dmp$diff_cleanupSemantic(diffs)
+# 
+#   html <- ""
+#   for (d in diffs) {
+#     op <- d[[1]]
+#     txt <- htmlEscape(d[[2]])
+#     if (op == -1) {
+#       html <- paste0(html, "<del style='color:red;'>", txt, "</del>")
+#     } else if (op == 1) {
+#       html <- paste0(html, "<ins style='color:green;'>", txt, "</ins>")
+#     } else {
+#       html <- paste0(html, txt)
+#     }
+#   }
+#   HTML(html)
+# }
+# 
+# library(diffobj)
+# 
+# highlight_diff <- function(old, new) {
+#   html <- capture.output(diffobj::diffChr(old %||% "", new %||% "", format = "html"))
+#   htmltools::HTML(paste(html, collapse = "\n"))
+# }
+# 
+# dmp <- import("diff_match_patch")$diff_match_patch()
+# 
+# highlight_diff <- function(old, new) {
+#   diffs <- dmp$diff_main(old %||% "", new %||% "")
+#   dmp$diff_cleanupSemantic(diffs)
+# 
+#   html <- ""
+#   for (d in diffs) {
+#     op <- d[[1]]
+#     text <- htmltools::htmlEscape(d[[2]])
+#     if (op == -1) {
+#       html <- paste0(html, "<del style='color:red;'>", text, "</del>")
+#     } else if (op == 1) {
+#       html <- paste0(html, "<ins style='color:green;'>", text, "</ins>")
+#     } else {
+#       html <- paste0(html, text)
+#     }
+#   }
+# 
+#   htmltools::HTML(html)
+# }
+# 
+# highlight_diff <- function(old, new) {
+#   dmp <- reticulate::import("diff_match_patch")$diff_match_patch()
+#   diffs <- dmp$diff_main(old %||% "", new %||% "")
+#   dmp$diff_cleanupSemantic(diffs)
+#   
+#   html <- ""
+#   for (d in diffs) {
+#     op <- d[[1]]
+#     txt <- d[[2]]
+#     
+#     # Escape backslashes and HTML special characters
+#     txt <- gsub("\\\\", "\\\\\\\\", txt)       # turn \ into \\
+#     txt <- htmlEscape(txt)                     # now escape for HTML
+# 
+#     if (op == -1) {
+#       html <- paste0(html, "<del style='color:red;'>", txt, "</del>")
+#     } else if (op == 1) {
+#       html <- paste0(html, "<ins style='color:green;'>", txt, "</ins>")
+#     } else {
+#       html <- paste0(html, txt)
+#     }
+#   }
+#   htmltools::HTML(paste0("<pre style='white-space:pre-wrap;'>", html, "</pre>"))
+# }
+# 
+# highlight_diff <- function(old, new) {
+#   diffs <- dmp$diff_main(old %||% "", new %||% "")
+#   dmp$diff_cleanupSemantic(diffs)
+#   dmp$diff_cleanupEfficiency(diffs)  # Added to reduce fragmentation
+# 
+#   html <- ""
+#   for (d in diffs) {
+#     op <- d[[1]]
+#     txt <- d[[2]]
+# 
+#     # Escape backslashes and HTML
+#     txt <- gsub("\\\\", "\\\\\\\\", txt)  # Turn \ into \\
+#     txt <- htmlEscape(txt)                # Escape HTML
+# 
+#     if (op == -1) {
+#       html <- paste0(html, "<del style='color:red;'>", txt, "</del>")
+#     } else if (op == 1) {
+#       html <- paste0(html, "<ins style='color:green;'>", txt, "</ins>")
+#     } else {
+#       html <- paste0(html, txt)
+#     }
+#   }
+# 
+#   htmltools::HTML(paste0("<pre style='white-space:pre-wrap;'>", html, "</pre>"))
+# }
+# 
+# highlight_diff_words <- function(old, new) {
+#   # Tokenize into word-like chunks, including LaTeX commands
+#   tokenize <- function(txt) {
+#     unlist(stringr::str_split(txt, "(?<=\\s|[{}])|(?=\\s|[{}])"))
+#   }
+# 
+#   # Map to control characters so we can diff by word tokens
+#   tok_old <- tokenize(old)
+#   tok_new <- tokenize(new)
+# 
+#   join_tokens <- function(toks) paste(toks, collapse = "\u241E")  # ␞
+# 
+#   str_old <- join_tokens(tok_old)
+#   str_new <- join_tokens(tok_new)
+# 
+#   # Diff using dmp
+#   diffs <- dmp$diff_main(str_old, str_new)
+#   dmp$diff_cleanupSemantic(diffs)
+# 
+#   # Render
+#   html <- ""
+#   for (d in diffs) {
+#     op <- d[[1]]
+#     txt <- d[[2]]
+# 
+#     # Split back into original tokens
+#     tokens <- strsplit(txt, "\u241E")[[1]]
+#     tokens <- sapply(tokens, function(t) htmlEscape(gsub("\\\\", "\\\\\\\\", t)))
+# 
+#     frag <- paste(tokens, collapse = "")
+#     if (op == -1) {
+#       html <- paste0(html, "<del style='color:red;'>", frag, "</del>")
+#     } else if (op == 1) {
+#       html <- paste0(html, "<ins style='color:green;'>", frag, "</ins>")
+#     } else {
+#       html <- paste0(html, frag)
+#     }
+#   }
+# 
+#   htmltools::HTML(paste0("<pre style='white-space:pre-wrap;'>", html, "</pre>"))
+# }
+
+```
+
+```{r results="asis"}
+# # Loop through commit pairs and show diffs
+# for (i in 1:(length(commit_info) - 1)) {
+#   sha_old <- commit_info[[i + 1]]$sha
+#   sha_new <- commit_info[[i]]$sha
+#   
+#   tex_old <- get_file_at_commit(owner, repo, path, sha_old)
+#   tex_new <- get_file_at_commit(owner, repo, path, sha_new)
+#   
+#   block_old <- extract_title_and_abstract(tex_old)
+#   block_new <- extract_title_and_abstract(tex_new)
+#   
+#   # Title
+# print(htmltools::HTML("<h3>Title</h3>"))
+# print(highlight_diff(block_old$title, block_new$title))
+# 
+# # Abstract
+# print(htmltools::HTML("<h3>Abstract</h3>"))
+# print(highlight_diff(block_old$abstract, block_new$abstract))
+# 
+# # Optional divider
+# print(htmltools::HTML("<hr>"))
+# 
+#   
+# #   # Render Markdown headings and text as-is
+# # knitr::asis_output(glue("## Diff: Commit {i} → {i+1}"))
+# # knitr::asis_output(glue("**Old SHA**: `{sha_old}`  "))
+# # knitr::asis_output(glue("**New SHA**: `{sha_new}`  "))
+# # 
+# # knitr::asis_output("### Title")
+# # highlight_diff(block_old$title, block_new$title)
+# # 
+# # knitr::asis_output("### Abstract")
+# # highlight_diff(block_old$abstract, block_new$abstract)
+# # 
+# # knitr::asis_output("### Test")
+# # highlight_diff(tex_old, tex_new)
+# # 
+# # knitr::asis_output("\n---\n")
+# 
+#   
+#   # cat(glue("## Diff: Commit {i} → {i+1}"))
+#   # cat(glue("\n\n"))
+#   # cat(glue("**Old SHA**: `{sha_old}`  \n**New SHA**: `{sha_new}`  \n\n"))
+#   # 
+#   # cat("### Title\n")
+#   # print(highlight_diff(block_old$title, block_new$title))
+#   # 
+#   # cat("\n\n### Abstract\n")
+#   # print(highlight_diff(block_old$abstract, block_new$abstract))
+#   # 
+#   # cat("\n\n### Text\n")
+#   # print(highlight_diff(tex_old, tex_new))
+#   # 
+#   # cat("\n\n---\n\n")
+#   
+
+# }
+
+```
+
+```{r, message=FALSE, warning=FALSE, results='asis'}
+# library(reticulate)
+# library(htmltools)
+# 
+# # Example inputs
+# old <- "\\title{Old Title}\n\\begin{abstract}This is a short abstract with \\href{https://example.com}{a link}.\n\\end{abstract}"
+# new <- "\\title{New Title}\n\\begin{abstract}This is an improved abstract with \\href{https://example.com}{an updated link} and more.\n\\end{abstract}"
+# 
+# # Show the result
+# print(highlight_diff_words(old, new))
+```
+
+```{r, message=FALSE, warning=FALSE, results='asis'}
+# library(reticulate)
+# library(stringr)
+# library(htmltools)
+# 
+# # Load Google's diff-match-patch
+# dmp <- import("diff_match_patch")$diff_match_patch()
+# 
+# highlight_diff_words <- function(old, new) {
+#   SEPARATOR <- "\u241E"  # Unique token separator
+#   
+#   # Tokenize into words, LaTeX symbols, and whitespace
+#   tokenize <- function(text) {
+#     # Split on word boundaries but keep spaces, LaTeX symbols, braces, etc.
+#     stringr::str_extract_all(text, "\\\\[a-zA-Z]+|\\S+|\\s+")[[1]]
+#   }
+# 
+#   # Join with separator and diff
+#   old_tokens <- tokenize(old)
+#   new_tokens <- tokenize(new)
+#   
+#   joined_old <- paste(old_tokens, collapse = SEPARATOR)
+#   joined_new <- paste(new_tokens, collapse = SEPARATOR)
+#   
+#   diffs <- dmp$diff_main(joined_old, joined_new)
+#   dmp$diff_cleanupSemantic(diffs)
+# 
+#   html <- ""
+#   for (d in diffs) {
+#     op <- d[[1]]
+#     token_str <- d[[2]]
+#     tokens <- strsplit(token_str, SEPARATOR)[[1]]
+# 
+#     # Escape LaTeX characters
+#     tokens <- sapply(tokens, function(tok) {
+#       tok <- gsub("\\\\", "\\\\\\\\", tok)  # Escape backslashes
+#       htmlEscape(tok)
+#     })
+# 
+#     frag <- paste0(tokens, collapse = "")
+#     if (op == -1) {
+#       html <- paste0(html, "<del style='color:red;'>", frag, "</del>")
+#     } else if (op == 1) {
+#       html <- paste0(html, "<ins style='color:green;'>", frag, "</ins>")
+#     } else {
+#       html <- paste0(html, frag)
+#     }
+#   }
+# 
+#   htmltools::HTML(paste0("<pre style='white-space:pre-wrap;'>", html, "</pre>"))
+# }
+# 
+# 
+# # ✅ Example test case
+# old <- "\\title{Old Title}\n\\begin{abstract}This is a short abstract with \\href{https://example.com}{a link}.\n\\end{abstract}"
+# new <- "\\title{New Title}\n\\begin{abstract}This is an improved abstract with \\href{https://example.com}{an updated link} and more.\n\\end{abstract}"
+# 
+# # ✅ Render the diff (this will show properly in HTML)
+# print(highlight_diff_words(old, new))
+```
+
+### Trying word matching
+
+```{r, results='asis'}
+library(reticulate)
+library(htmltools)
+library(stringr)
+
+# Load Python diff_match_patch
+dmp <- import("diff_match_patch")$diff_match_patch()
+
+# Word splitter (split on whitespace or LaTeX delimiters)
+split_words <- function(text) {
+  # Split on spaces, punctuation, or LaTeX braces
+  str_extract_all(text, "\\\\[a-zA-Z]+|\\S+|\\s+")[[1]]
+}
+
+# Reimplement the diff_words mode
+diff_words <- function(text1, text2) {
+  # Tokenize to word list
+  tokens1 <- split_words(text1)
+  tokens2 <- split_words(text2)
+
+  # Build unique token map
+  token_map <- list()
+  token_array <- c()
+  chars1 <- c()
+  chars2 <- c()
+  last_token_id <- 0
+
+  token_to_char <- function(tok) {
+    if (!tok %in% names(token_map)) {
+      token_map[[tok]] <<- intToUtf8(last_token_id)
+      token_array <<- c(token_array, tok)
+      last_token_id <<- last_token_id + 1
+    }
+    token_map[[tok]]
+  }
+
+  chars1 <- paste0(vapply(tokens1, token_to_char, character(1)), collapse = "")
+  chars2 <- paste0(vapply(tokens2, token_to_char, character(1)), collapse = "")
+
+  # Perform diff on encoded chars
+  diffs <- dmp$diff_main(chars1, chars2, FALSE)
+  dmp$diff_cleanupSemantic(diffs)
+
+  # Convert back to tokens
+  decoded_diffs <- list()
+  for (d in diffs) {
+    op <- d[[1]]
+    chars <- strsplit(d[[2]], "")[[1]]
+    words <- vapply(chars, function(c) {
+      token_array[utf8ToInt(c) + 1]
+    }, character(1))
+    decoded_diffs <- append(decoded_diffs, list(list(op, words)))
+  }
+
+  return(decoded_diffs)
+}
+
+# Format diff result to HTML
+render_diff_html <- function(decoded_diffs) {
+  html <- ""
+  for (d in decoded_diffs) {
+    op <- d[[1]]
+    tokens <- d[[2]]
+    frag <- paste0(sapply(tokens, function(tok) {
+      htmlEscape(gsub("\\\\", "\\\\\\\\", tok))
+    }), collapse = "")
+
+    if (op == -1) {
+      html <- paste0(html, "<del style='color:red;'>", frag, "</del>")
+    } else if (op == 1) {
+      html <- paste0(html, "<ins style='color:green;'>", frag, "</ins>")
+    } else {
+      html <- paste0(html, frag)
+    }
+  }
+  HTML(paste0("<pre style='white-space:pre-wrap;'>", html, "</pre>"))
+}
+
+# Test case
+old <- "\\title{Old Title}\n\\begin{abstract}This is a short abstract with \\href{https://example.com}{a link}.\n\\end{abstract}"
+new <- "\\title{New Title}\n\\begin{abstract}This is an improved abstract with \\href{https://example.com}{an updated link} and more.\n\\end{abstract}"
+
+diffs <- diff_words(old, new)
+print(render_diff_html(diffs))
+```
+
+```{r, results = "asis"}
+
+for (i in 1:(length(commit_info) - 1)) {
+  sha_old <- commit_info[[i + 1]]$sha
+  sha_new <- commit_info[[i]]$sha
+  
+  tex_old <- get_file_at_commit(owner, repo, path, sha_old)
+  tex_new <- get_file_at_commit(owner, repo, path, sha_new)
+  
+  block_old <- extract_title_and_abstract(tex_old)
+  block_new <- extract_title_and_abstract(tex_new)
+  
+  # Title
+print(htmltools::HTML("<h3>Title</h3>"))
+diffs <- diff_words(block_old$title, block_new$title)
+print(render_diff_html(diffs))
+
+# Abstract
+print(htmltools::HTML("<h3>Abstract</h3>"))
+diffs <- diff_words(block_old$abstract, block_new$abstract)
+print(render_diff_html(diffs))
+
+# Text
+print(htmltools::HTML("<h3>Text</h3>"))
+diffs <- diff_words(tex_old, tex_new)
+print(render_diff_html(diffs))
+
+# Optional divider
+print(htmltools::HTML("<hr>"))
+
+}
+```
+

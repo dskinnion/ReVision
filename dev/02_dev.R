@@ -34,7 +34,7 @@ golem::add_js_file("script")
 golem::add_js_handler("handlers")
 golem::add_css_file("custom")
 golem::add_sass_file("custom")
-golem::add_any_file("file.json")
+# golem::add_any_file("file.json")
 
 ## Add internal datasets ----
 ## If you have data in your package
@@ -62,6 +62,7 @@ covrpage::covrpage()
 ## service for your application
 ##
 ## (You'll need GitHub there)
+usethis::use_git_remote("origin", url = NULL, overwrite = TRUE)
 usethis::use_github()
 
 # GitHub Actions
@@ -70,9 +71,8 @@ usethis::use_github_action()
 # See https://usethis.r-lib.org/reference/use_github_action.html
 usethis::use_github_action_check_release()
 usethis::use_github_action_check_standard()
-usethis::use_github_action_check_full()
 # Add action for PR
-usethis::use_github_action_pr_commands()
+usethis::use_github_action()
 
 # Circle CI
 usethis::use_circleci()

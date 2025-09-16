@@ -17,6 +17,9 @@ output: github_document
 
 <!-- badges: start -->
 [![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+[![Codecov test coverage](https://codecov.io/gh/<OWNER>/<REPO>/graph/badge.svg)](https://app.codecov.io/gh/<OWNER>/<REPO>)
+[![R-CMD-check](https://github.com/dskinnion/ReVision/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/dskinnion/ReVision/actions/workflows/R-CMD-check.yaml)
+[![CircleCI build status](https://circleci.com/gh/dskinnion/ReVision.svg?style=svg)](https://circleci.com/gh/dskinnion/ReVision)
 <!-- badges: end -->
 
 ## Installation

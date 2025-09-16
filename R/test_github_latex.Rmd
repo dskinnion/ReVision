@@ -1,0 +1,368 @@
+---
+title: "test github latex"
+output: html_document
+date: "2025-06-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(gh)
+library(stringr)
+library(base64enc)
+library(htmltools)
+library(diffobj)
+library(diffmatchpatch)
+library(latexdiffr)
+```
+
+```{r}
+url <- "https://github.com/iqss-research/2k1-in-silico/blob/master/text/2k1.tex"
+```
+
+```{r}
+
+pattern <- "^https://github\\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*\\.tex)$"
+matches <- stringr::str_match(url, pattern)
+
+if (any(is.na(matches))) stop("❌ Invalid GitHub .tex file URL")
+
+owner <- as.character(matches[2])
+repo  <- as.character(matches[3])
+ref   <- as.character(matches[4])
+path  <- as.character(matches[5])
+
+# Confirm everything is a character
+str(list(owner = owner, repo = repo, ref = ref, path = path))
+
+# 2. Fetch file
+tryCatch({
+  tex_raw <- gh::gh(
+    "/repos/:owner/:repo/contents/:path",
+    owner = owner,
+    repo = repo,
+    path = path,
+    ref = ref
+  )
+  
+  raw_text <- rawToChar(base64enc::base64decode(tex_raw$content))
+
+  lines <- strsplit(raw_text, "\n")[[1]]
+  cat("✅ Successfully fetched file.\n\n")
+  cat("📄 First 10 lines:\n\n")
+  cat(paste(head(lines, 10), collapse = "\n"))
+
+}, error = function(e) {
+  message("❌ Failed to fetch file: ", conditionMessage(e))
+})
+
+
+```
+
+```{r}
+
+get_full_latex_by_commit <- function(owner, repo, path, ref = "main", max_commits = 20) {
+
+  commits <- tryCatch({
+    gh::gh(
+      "/repos/:owner/:repo/commits",
+      owner = owner,
+      repo = repo,
+      path = path,
+      sha = ref,
+      .limit = max_commits
+    )
+  }, error = function(e) {
+    message("❌ Failed to fetch commits: ", conditionMessage(e))
+    return(NULL)
+  })
+
+  if (is.null(commits) || length(commits) == 0) return(list())
+
+  results <- list()
+
+  for (commit in commits) {
+    sha <- commit$sha
+
+    full_text <- tryCatch({
+      content_obj <- gh::gh(
+        "/repos/:owner/:repo/contents/:path",
+        owner = owner,
+        repo = repo,
+        path = path,
+        ref = sha
+      )
+
+      rawToChar(content_obj)
+
+    }, error = function(e) {
+      message("⚠️ Skipped commit ", substr(sha, 1, 7), ": ", conditionMessage(e))
+      NULL
+    })
+
+    if (!is.null(full_text)) {
+      results[[sha]] <- full_text
+    }
+  }
+
+  return(results)
+}
+
+
+```
+
+```{r}
+full_latex <- get_full_latex_by_commit(owner, repo, path, ref)
+```
+
+```{r}
+
+get_commits_for_file <- function(owner, repo, path, ref = "main", max_commits = 20) {
+  commits <- tryCatch({
+    gh::gh(
+      "/repos/:owner/:repo/commits",
+      owner = owner,
+      repo = repo,
+      path = path,
+      sha = ref,
+      .limit = max_commits
+    )
+  }, error = function(e) {
+    message("❌ Failed to fetch commits: ", conditionMessage(e))
+    return(NULL)
+  })
+
+  if (is.null(commits) || length(commits) == 0) return(NULL)
+
+  # Extract summary info into a data frame or list
+  commit_data <- lapply(commits, function(commit) {
+    list(
+      sha     = commit$sha,
+      message = commit$commit$message,
+      author  = commit$commit$author$name,
+      date    = commit$commit$author$date,
+      url     = commit$html_url
+    )
+  })
+
+  return(commit_data)
+}
+
+
+```
+
+```{r}
+commits <- get_commits_for_file(owner, repo, path, ref)
+```
+
+```{r}
+
+get_tex_diffs <- function(owner, repo, path, commits) {
+  results <- list()
+
+  for (commit in commits) {
+    sha <- commit$sha
+
+    commit_data <- tryCatch({
+      gh::gh(
+        "/repos/:owner/:repo/commits/:sha",
+        owner = owner,
+        repo = repo,
+        sha = sha
+      )
+    }, error = function(e) {
+      message("❌ Failed to fetch commit ", substr(sha, 1, 7), ": ", conditionMessage(e))
+      return(NULL)
+    })
+
+    if (is.null(commit_data)) next
+
+    tex_file <- Filter(function(f) f$filename == path, commit_data$files)
+
+    if (length(tex_file) > 0 && !is.null(tex_file[[1]]$patch)) {
+      results[[sha]] <- tex_file[[1]]$patch
+    }
+  }
+
+  return(results)
+}
+
+
+```
+
+```{r}
+
+diffs <- get_tex_diffs(owner, repo, path, commits)
+
+```
+
+```{r}
+
+highlight_patch_diff <- function(diff_text) {
+  lines <- strsplit(diff_text, "\n")[[1]]
+
+  html_lines <- vapply(lines, function(line) {
+    if (startsWith(line, "+") && !startsWith(line, "+++")) {
+      sprintf("<div style='color:green;'>%s</div>", htmlEscape(line))
+    } else if (startsWith(line, "-") && !startsWith(line, "---")) {
+      sprintf("<div style='color:red;text-decoration:line-through;'>%s</div>", htmlEscape(line))
+    } else if (startsWith(line, "@@")) {
+      sprintf("<div style='color:blue;font-weight:bold;'>%s</div>", htmlEscape(line))
+    } else {
+      sprintf("<div style='color:gray;'>%s</div>", htmlEscape(line))
+    }
+  }, character(1))
+
+  HTML(paste(html_lines, collapse = "\n"))
+}
+
+```
+
+```{r, results = 'asis'}
+
+for (i in seq_along(diffs)) {
+  sha <- names(diffs)[i]
+  diff_text <- diffs[[i]]
+
+  cat("### Diff for Commit", substr(sha, 1, 7), "\n\n")
+
+  # Get the HTML fragment
+  html_output <- highlight_patch_diff(diff_text)
+
+  # Print it to the knitted document
+  print(html_output)
+
+  cat("\n\n")
+}
+
+```
+
+
+```{r}
+
+extract_abstract <- function(tex_blob) {
+  # Use regex with (?s) so '.' matches newlines
+  match <- stringr::str_match(tex_blob, "(?s)\\\\begin\\{abstract\\}(.*?)\\\\end\\{abstract\\}")
+  
+  if (!is.na(match[2])) {
+    abstract <- match[2]
+    abstract <- gsub("^\\s+|\\s+$", "", abstract)  # Trim leading/trailing whitespace
+    return(abstract)
+  } else {
+    return(NA_character_)
+  }
+}
+
+```
+
+```{r}
+abstracts <- lapply(full_latex, extract_abstract)
+
+```
+
+```{r}
+
+filter_unique_abstracts <- function(abstracts) {
+  if (length(abstracts) <= 1) return(abstracts)
+
+  shas <- names(abstracts)
+  keep <- logical(length(abstracts))
+  keep[1] <- TRUE  # always keep the first
+
+  for (i in 2:length(abstracts)) {
+    prev <- abstracts[[i - 1]]
+    curr <- abstracts[[i]]
+
+    if (!identical(prev, curr)) {
+      keep[i] <- TRUE
+    }
+  }
+
+  abstracts[keep]
+}
+
+```
+
+```{r}
+changed_abstracts <- filter_unique_abstracts(abstracts)
+shas <- names(changed_abstracts)
+```
+
+```{r}
+
+for (i in seq_along(shas)) {
+  cat("### Commit", substr(shas[i], 1, 7), "\n\n")
+  cat("```text\n")
+  cat(changed_abstracts[[i]])
+  cat("\n```\n\n")
+
+  # Show diff vs previous version
+  if (i > 1) {
+    cat("#### Diff vs Previous\n")
+    diff <- diffChr(changed_abstracts[[i-1]], changed_abstracts[[i]], format = "raw")
+    cat("```diff\n")
+    cat(as.character(diff))
+    cat("\n```\n\n")
+  }
+}
+
+
+```
+
+```{r}
+for (i in 2:length(changed_abstracts)) {
+  sha_prev <- names(changed_abstracts)[i - 1]
+  sha_curr <- names(changed_abstracts)[i]
+
+  cat("### Change from Commit", substr(sha_prev, 1, 7), "→", substr(sha_curr, 1, 7), "\n\n")
+
+  diff_html <- as.character(
+    diffChr(
+      changed_abstracts[[i - 1]],
+      changed_abstracts[[i]],
+      format = "html"
+    )
+  )
+
+  # Render as HTML
+  htmltools::HTML(diff_html)
+  cat("\n\n")
+}
+```
+
+```{r}
+
+options(max.print = 1e6)
+
+highlight_diff_with_all_text <- function(old_text, new_text) {
+  diff_lines <- diffobj::diffChr(old_text, new_text, format = "raw")
+  lines <- as.character(diff_lines)
+
+  html_lines <- vapply(lines, function(line) {
+    if (startsWith(line, "+")) {
+      sprintf("<span style='color:green;'>%s</span>", htmlEscape(line))
+    } else if (startsWith(line, "-")) {
+      sprintf("<span style='color:red;text-decoration:line-through;'>%s</span>", htmlEscape(line))
+    } else {
+      # unchanged lines in gray
+      sprintf("<span style='color:gray;'>%s</span>", htmlEscape(line))
+    }
+  }, character(1))
+
+  HTML(paste(html_lines, collapse = "<br>\n"))
+}
+```
+
+```{r, warning = F, results = 'asis'}
+
+for (i in 2:length(changed_abstracts)) {
+  sha1 <- names(changed_abstracts)[i - 1]
+  sha2 <- names(changed_abstracts)[i]
+
+  cat("### Change from Commit", substr(sha1, 1, 7), "→", substr(sha2, 1, 7), "\n\n")
+  highlight_diff_with_all_text(changed_abstracts[[i - 1]], changed_abstracts[[i]])
+  cat("\n\n")
+}
+
+```
+
